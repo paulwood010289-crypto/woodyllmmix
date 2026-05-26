@@ -289,6 +289,87 @@
       border: 1px solid rgba(6,182,212,0.3);
     }
 
+    /* ── Synthesis panel ─────────────────────────────────────────────────── */
+
+    .synthesis {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .synthesis .panel-head {
+      background: linear-gradient(to right, rgba(245,158,11,0.12), transparent);
+      border-bottom-color: rgba(245,158,11,0.25);
+    }
+
+    .synthesis .panel-avatar {
+      background: #f59e0b;
+      color: #000;
+    }
+
+    .synthesis .panel-name { color: #fcd34d; }
+
+    .synthesis .panel-model { color: var(--muted); font-size: 11px; margin-top: 1px; }
+
+    .synthesis .feed { max-height: 340px; }
+
+    .synthesis .dots span { background: #f59e0b; }
+
+    .synth-round {
+      display: flex;
+      gap: 10px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .synth-round:last-child { border-bottom: none; }
+
+    .synth-round-num {
+      flex-shrink: 0;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #f59e0b;
+      width: 68px;
+      padding-top: 2px;
+    }
+
+    .synth-body { flex: 1; }
+
+    .synth-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--muted);
+      margin-bottom: 7px;
+    }
+
+    .synth-text {
+      font-size: 14px;
+      line-height: 1.75;
+      color: var(--text);
+      white-space: pre-wrap;
+    }
+
+    .verdict-badge {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 5px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+    }
+
+    .verdict-badge.claude  { background: rgba(139,92,246,0.2); color: var(--claude-light); border: 1px solid rgba(139,92,246,0.35); }
+    .verdict-badge.gemini  { background: rgba(6,182,212,0.2);  color: var(--gemini-light); border: 1px solid rgba(6,182,212,0.35); }
+    .verdict-badge.draw    { background: rgba(245,158,11,0.2);  color: #fcd34d;             border: 1px solid rgba(245,158,11,0.35); }
+
     /* ── Message feed ────────────────────────────────────────────────────── */
     .feed {
       flex: 1;
@@ -357,8 +438,9 @@
       animation: bop 1.2s ease-in-out infinite;
     }
 
-    .c-panel .dots span { background: var(--claude); }
-    .g-panel .dots span { background: var(--gemini); }
+    .c-panel   .dots span { background: var(--claude); }
+    .g-panel   .dots span { background: var(--gemini); }
+    .synthesis .dots span { background: #f59e0b; }
 
     .dots span:nth-child(2) { animation-delay: 0.18s; }
     .dots span:nth-child(3) { animation-delay: 0.36s; }
@@ -629,6 +711,23 @@
 
   </div>
 
+  <!-- Synthesis panel -->
+  <div class="panel synthesis" id="synthesisPanel">
+    <div class="panel-head">
+      <div class="panel-avatar">⚖</div>
+      <div class="panel-meta">
+        <div class="panel-name">Synthesis</div>
+        <div class="panel-model">Impartial analysis &amp; verdict after each round</div>
+      </div>
+    </div>
+    <div class="feed" id="synthFeed">
+      <div class="empty">
+        <div class="empty-icon">⚖️</div>
+        <div class="empty-txt">After each round, an impartial judge will analyse both arguments,<br>highlight the strongest points, and deliver a final verdict.</div>
+      </div>
+    </div>
+  </div>
+
   <!-- Status bar -->
   <div class="statusbar">
     <div class="status-light" id="sLight"></div>
@@ -796,6 +895,52 @@ async function askGemini(prompt, onToken) {
   return full;
 }
 
+// ── Synthesis feed helpers ────────────────────────────────────────────────────
+function addSynthTurn(roundNum, labelText, isFinal) {
+  const feed = document.getElementById('synthFeed');
+  const div  = document.createElement('div');
+  div.className = 'synth-round';
+  div.id = 'synth-r' + roundNum;
+  div.innerHTML = `
+    <div class="synth-round-num">${isFinal ? 'Verdict' : 'Rnd ' + roundNum}</div>
+    <div class="synth-body">
+      <div class="synth-label">${labelText}</div>
+      <div class="synth-text"></div>
+    </div>`;
+  feed.appendChild(div);
+  feed.scrollTop = feed.scrollHeight;
+  return div.querySelector('.synth-text');
+}
+
+// ── Judge call (uses Claude as impartial analyst) ─────────────────────────────
+async function askJudge(model, topic, round, total, claudeSide, claudeArg, geminiArg, isFinal) {
+  const judgeSystem = `You are an impartial debate judge and analyst. Your job is to fairly evaluate both sides of a debate, identify the strongest and weakest arguments made, and give a balanced synthesis. You have no preference for either Claude or Gemini. Be concise and sharp.`;
+
+  const judgePrompt = isFinal
+    ? `You have observed the full ${total}-round debate on: "${topic}"
+Claude argued ${claudeSide ? 'FOR' : 'AGAINST'} the motion; Gemini argued ${claudeSide ? 'AGAINST' : 'FOR'} it.
+
+Final round — Claude's closing:
+"${claudeArg.slice(0, 700)}${claudeArg.length > 700 ? '…' : ''}"
+
+Final round — Gemini's closing:
+"${geminiArg.slice(0, 700)}${geminiArg.length > 700 ? '…' : ''}"
+
+Provide:
+1. A 2-paragraph overall synthesis of the strongest arguments from each side across the whole debate.
+2. A clear VERDICT: who made the more compelling overall case and why. End your verdict line with one of these exact tags on its own line: [WINNER: CLAUDE], [WINNER: GEMINI], or [WINNER: DRAW].`
+    : `Debate topic: "${topic}" — Round ${round} of ${total}.
+Claude (arguing ${claudeSide ? 'FOR' : 'AGAINST'}):
+"${claudeArg.slice(0, 500)}${claudeArg.length > 500 ? '…' : ''}"
+
+Gemini (arguing ${claudeSide ? 'AGAINST' : 'FOR'}):
+"${geminiArg.slice(0, 500)}${geminiArg.length > 500 ? '…' : ''}"
+
+In 2 short paragraphs: (1) identify the strongest point each debater made this round, (2) note any weaknesses or missed opportunities. Be balanced and specific.`;
+
+  return askClaude(model, judgeSystem, judgePrompt, () => {});
+}
+
 // ── Round label helper ────────────────────────────────────────────────────────
 function roundLabel(i, total) {
   if (i === 0)          return 'Opening Argument';
@@ -831,6 +976,7 @@ async function startDebate() {
   document.getElementById('btnStart').textContent = 'Debating…';
   clearFeed('claudeFeed');
   clearFeed('geminiFeed');
+  clearFeed('synthFeed');
 
   // Debate history: array of { role: 'claude'|'gemini', round, text }
   const history = [];
@@ -904,6 +1050,39 @@ Respond directly to their points and reinforce your position.`;
       } finally { removeTyping('geminiFeed'); }
       history.push({ role: 'gemini', round: r, text: geminiText });
 
+      // ── Judge synthesises the round ──
+      const isFinal    = r === totalRounds - 1;
+      const synthLabel = isFinal ? `Final Verdict · Full Debate Analysis` : `Round ${r + 1} Analysis`;
+      status(`Round ${r + 1}/${totalRounds} — Judge analysing…`, true);
+      addTyping('synthFeed');
+
+      let synthText = '';
+      try {
+        synthText = await askJudge(
+          'claude-sonnet-4-6', topic, r + 1, totalRounds,
+          claudeFor, claudeText, geminiText, isFinal
+        );
+      } catch (judgeErr) {
+        synthText = `(Analysis unavailable: ${judgeErr.message})`;
+      }
+      removeTyping('synthFeed');
+
+      const synthEl = addSynthTurn(r + 1, synthLabel, isFinal);
+      synthEl.textContent = synthText;
+
+      // Parse verdict badge if final round
+      if (isFinal) {
+        let badge = '';
+        if (/\[WINNER:\s*CLAUDE\]/i.test(synthText))  badge = '<span class="verdict-badge claude">🏆 Claude wins</span>';
+        else if (/\[WINNER:\s*GEMINI\]/i.test(synthText)) badge = '<span class="verdict-badge gemini">🏆 Gemini wins</span>';
+        else if (/\[WINNER:\s*DRAW\]/i.test(synthText))   badge = '<span class="verdict-badge draw">🤝 Draw</span>';
+        if (badge) synthEl.insertAdjacentHTML('afterend', badge);
+        // Strip the tag from visible text
+        synthEl.textContent = synthText.replace(/\[WINNER:[^\]]+\]/gi, '').trim();
+      }
+
+      document.getElementById('synthFeed').scrollTop = 99999;
+
       if (r < totalRounds - 1) await new Promise(ok => setTimeout(ok, 300));
     }
 
@@ -912,6 +1091,7 @@ Respond directly to their points and reinforce your position.`;
   } catch (err) {
     removeTyping('claudeFeed');
     removeTyping('geminiFeed');
+    removeTyping('synthFeed');
     status(`Error: ${err.message}`);
     console.error(err);
   } finally {
