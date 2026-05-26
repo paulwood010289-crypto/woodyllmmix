@@ -565,6 +565,14 @@
           <option value="claude-haiku-4-5-20251001">claude-haiku-4-5</option>
         </select>
       </div>
+      <div class="opt">
+        <label>Gemini model</label>
+        <select id="selGeminiModel">
+          <option value="gemini-2.5-flash" selected>gemini-2.5-flash</option>
+          <option value="gemini-2.5-pro">gemini-2.5-pro</option>
+          <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+        </select>
+      </div>
       <div class="opt" style="margin-left:auto; font-size:11px; color:var(--muted);">
         ⌘↵ or Ctrl↵ to run
       </div>
@@ -597,7 +605,7 @@
         <div class="avatar">G</div>
         <div class="panel-meta">
           <div class="panel-name">Gemini</div>
-          <div class="panel-sub">Working drafts</div>
+          <div class="panel-sub" id="geminiSubLabel">Working drafts</div>
         </div>
       </div>
       <div class="feed" id="geminiFeed">
@@ -855,7 +863,8 @@ async function askGemini(promptText, onToken) {
   const key = localStorage.getItem('gk');
   if (!key) throw new Error('No Gemini key — click ⚙ Keys.');
 
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?key=${key}&alt=sse`;
+  const geminiModel = document.getElementById('selGeminiModel')?.value || 'gemini-2.5-flash';
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:streamGenerateContent?key=${key}&alt=sse`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -993,13 +1002,15 @@ async function startRun() {
     openModal(); setStatus('Enter your API keys first'); return;
   }
 
-  const totalIter = parseInt(document.getElementById('selIter').value);
-  const model     = document.getElementById('selModel').value;
+  const totalIter   = parseInt(document.getElementById('selIter').value);
+  const model       = document.getElementById('selModel').value;
+  const geminiModel = document.getElementById('selGeminiModel').value;
 
   busy = true;
   document.getElementById('btnRun').disabled = true;
   document.getElementById('btnRun').textContent = 'Running…';
   document.getElementById('claudeSubLabel').textContent = model + ' · Anthropic';
+  document.getElementById('geminiSubLabel').textContent = geminiModel + ' · Google';
   clearFeed('claudeFeed');
   clearFeed('geminiFeed');
   initAnswerPanel();
