@@ -110,6 +110,95 @@
       font-size: 13px; outline: none; cursor: pointer;
     }
 
+    /* ── Clarification panel ─────────────────────────────────────────────── */
+    .clarify-panel {
+      background: var(--surface);
+      border: 1px solid rgba(139,92,246,0.35);
+      border-radius: var(--radius);
+      overflow: hidden;
+      box-shadow: 0 0 0 1px rgba(139,92,246,0.06), 0 4px 24px rgba(139,92,246,0.06);
+      animation: slideDown 0.2s ease-out;
+    }
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .clarify-head {
+      padding: 12px 18px;
+      display: flex; align-items: center; gap: 10px;
+      background: linear-gradient(to right, rgba(139,92,246,0.1), transparent);
+      border-bottom: 1px solid rgba(139,92,246,0.2);
+    }
+    .clarify-head-text { flex: 1; }
+    .clarify-title { font-size: 13px; font-weight: 700; color: var(--claude-lt); }
+    .clarify-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .clarify-body  { padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+
+    .clarify-q { display: flex; flex-direction: column; gap: 6px; }
+    .clarify-q-text {
+      font-size: 13px; font-weight: 500; color: var(--text); line-height: 1.5;
+    }
+    .clarify-q-num {
+      display: inline-block; width: 18px; height: 18px;
+      background: rgba(139,92,246,0.2); color: var(--claude-lt);
+      border-radius: 50%; font-size: 10px; font-weight: 700;
+      text-align: center; line-height: 18px; margin-right: 6px; flex-shrink: 0;
+    }
+    .clarify-input {
+      width: 100%; background: var(--bg);
+      border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-size: 13px; font-family: inherit;
+      padding: 9px 13px; outline: none; resize: none;
+      transition: border-color 0.2s; line-height: 1.5;
+    }
+    .clarify-input:focus { border-color: var(--claude); }
+    .clarify-input::placeholder { color: var(--muted); font-style: italic; }
+
+    .clarify-actions {
+      display: flex; gap: 10px; padding: 0 18px 16px;
+      align-items: center;
+    }
+    .btn-continue {
+      padding: 9px 22px;
+      background: linear-gradient(135deg, var(--claude), var(--gemini));
+      border: none; border-radius: 8px; color: #fff;
+      font-size: 13px; font-weight: 600; cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn-continue:hover { opacity: 0.88; }
+    .btn-skip {
+      padding: 9px 16px; background: transparent;
+      border: 1px solid var(--border); border-radius: 8px;
+      color: var(--muted); font-size: 13px; cursor: pointer;
+    }
+    .btn-skip:hover { border-color: var(--muted); color: var(--text); }
+    .clarify-hint { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+    /* Clarify toggle pill */
+    .toggle-wrap {
+      display: flex; align-items: center; gap: 7px;
+      padding: 4px 10px 4px 6px;
+      border: 1px solid var(--border); border-radius: 20px;
+      cursor: pointer; user-select: none;
+      transition: border-color 0.2s;
+    }
+    .toggle-wrap:hover { border-color: var(--claude); }
+    .toggle-wrap.on { border-color: rgba(139,92,246,0.5); background: rgba(139,92,246,0.08); }
+    .toggle-switch {
+      width: 28px; height: 16px; border-radius: 8px;
+      background: var(--border); position: relative;
+      transition: background 0.2s; flex-shrink: 0;
+    }
+    .toggle-switch::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--muted); transition: transform 0.2s, background 0.2s;
+    }
+    .toggle-wrap.on .toggle-switch { background: rgba(139,92,246,0.4); }
+    .toggle-wrap.on .toggle-switch::after { transform: translateX(12px); background: var(--claude-lt); }
+    .toggle-label { font-size: 12px; color: var(--muted); transition: color 0.2s; }
+    .toggle-wrap.on .toggle-label { color: var(--claude-lt); }
+
     /* ── Working columns ─────────────────────────────────────────────────── */
     .drafts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
     @media (max-width: 680px) { .drafts { grid-template-columns: 1fr; } }
@@ -416,9 +505,16 @@
           <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
         </select>
       </div>
+      <div class="toggle-wrap" id="clarifyToggle" onclick="toggleClarify()" title="Claude will ask 2–3 questions before running">
+        <div class="toggle-switch"></div>
+        <span class="toggle-label">Clarify first</span>
+      </div>
       <div class="opt" style="margin-left:auto; font-size:11px; color:var(--muted);">⌘↵ or Ctrl↵ to run</div>
     </div>
   </div>
+
+  <!-- Clarification panel (injected here when active) -->
+  <div id="clarifySlot"></div>
 
   <!-- Working columns -->
   <div class="drafts">
@@ -513,8 +609,113 @@ document.getElementById('overlay').addEventListener('click', e => {
 });
 
 // ── State ─────────────────────────────────────────────────────────────────────
-let busy      = false;
-let turnPages = []; // { el, tabEl } per turn
+let busy           = false;
+let turnPages      = [];
+let clarifyEnabled = false;
+let clarifyResolve = null; // resolves when user submits/skips clarification
+
+// ── Clarify toggle ────────────────────────────────────────────────────────────
+function toggleClarify() {
+  clarifyEnabled = !clarifyEnabled;
+  document.getElementById('clarifyToggle').classList.toggle('on', clarifyEnabled);
+}
+
+// ── Generate clarifying questions via Claude ──────────────────────────────────
+async function getClarifyingQuestions(prompt, model) {
+  const key = localStorage.getItem('ak');
+  if (!key) throw new Error('No Anthropic key.');
+
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 300,
+      system: `You generate clarifying questions to improve AI responses. Given a user prompt, identify the 2-3 most important missing details that would meaningfully change or improve the answer. Focus on things like: intended audience, format or length, specific constraints, desired angle, or genuinely ambiguous terms. Be concise and specific. Return ONLY a valid JSON array of question strings — no other text.`,
+      messages: [{
+        role: 'user',
+        content: `Generate 2-3 clarifying questions for this prompt:\n\n"${prompt}"\n\nReturn only a JSON array, e.g. ["Question one?", "Question two?"]`
+      }]
+    })
+  });
+
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}));
+    throw new Error(j.error?.message || res.statusText);
+  }
+
+  const data = await res.json();
+  const text = data.content?.[0]?.text?.trim() || '[]';
+  // Extract JSON array even if there's stray text
+  const match = text.match(/\[[\s\S]*\]/);
+  if (!match) return [];
+  return JSON.parse(match[0]);
+}
+
+// ── Show clarification panel, return enriched context string ──────────────────
+function showClarifyPanel(questions) {
+  return new Promise(resolve => {
+    clarifyResolve = resolve;
+    const slot = document.getElementById('clarifySlot');
+
+    const qs = questions.map((q, i) => `
+      <div class="clarify-q">
+        <div class="clarify-q-text">
+          <span class="clarify-q-num">${i + 1}</span>${q}
+        </div>
+        <textarea class="clarify-input" id="clarifyA${i}" rows="2"
+          placeholder="Your answer (leave blank to skip this question)"></textarea>
+      </div>`).join('');
+
+    slot.innerHTML = `
+      <div class="clarify-panel">
+        <div class="clarify-head">
+          <div class="avatar" style="background:var(--claude);color:#fff;width:30px;height:30px;font-size:13px;font-weight:800;">C</div>
+          <div class="clarify-head-text">
+            <div class="clarify-title">Claude has a few questions</div>
+            <div class="clarify-sub">Answering these will improve the quality of the response — or skip to run with your prompt as-is</div>
+          </div>
+        </div>
+        <div class="clarify-body">${qs}</div>
+        <div class="clarify-actions">
+          <button class="btn-continue" onclick="submitClarify(${questions.length})">Continue →</button>
+          <button class="btn-skip" onclick="skipClarify()">Skip</button>
+          <span class="clarify-hint">Blank answers are ignored</span>
+        </div>
+      </div>`;
+
+    // Focus the first input
+    setTimeout(() => {
+      const first = document.getElementById('clarifyA0');
+      if (first) first.focus();
+    }, 100);
+  });
+}
+
+function submitClarify(count) {
+  const answers = [];
+  for (let i = 0; i < count; i++) {
+    const el = document.getElementById(`clarifyA${i}`);
+    const q  = el?.previousElementSibling?.textContent?.replace(/^\d/, '').trim();
+    const a  = el?.value?.trim();
+    if (a) answers.push(`${q}: ${a}`);
+  }
+  _resolveClarify(answers.length
+    ? `\n\nAdditional context from the user:\n${answers.map(a => `• ${a}`).join('\n')}`
+    : '');
+}
+
+function skipClarify() { _resolveClarify(''); }
+
+function _resolveClarify(context) {
+  document.getElementById('clarifySlot').innerHTML = '';
+  if (clarifyResolve) { clarifyResolve(context); clarifyResolve = null; }
+}
 
 // ── Status ────────────────────────────────────────────────────────────────────
 function setStatus(msg, live = false) {
@@ -717,14 +918,14 @@ const CLAUDE_SYS = `You are an expert AI assistant focused on producing the most
 
 const GEMINI_SYS = `You are an expert AI assistant focused on producing the most accurate, clear, and comprehensive answers possible. When reviewing another model's response, identify specific gaps, errors, or areas that could be improved, then write a superior version.`;
 
-function claudeFirstPrompt(prompt) {
-  return `Please answer the following as accurately and comprehensively as possible:\n\n${prompt}`;
+function claudeFirstPrompt(prompt, extraContext) {
+  return `Please answer the following as accurately and comprehensively as possible:\n\n${prompt}${extraContext}`;
 }
 
-function claudeReviewPrompt(prompt, prevResponse, iterNum) {
+function claudeReviewPrompt(prompt, prevResponse, extraContext) {
   return `You are improving on the following response to this prompt.
 
-PROMPT: ${prompt}
+PROMPT: ${prompt}${extraContext}
 
 GEMINI'S RESPONSE (to improve on):
 ${prevResponse}
@@ -734,12 +935,12 @@ Your task: Carefully review Gemini's response above. Identify any inaccuracies, 
 Output only the improved response — no preamble like "Here is my improved version".`;
 }
 
-function geminiReviewPrompt(prompt, prevResponse, iterNum) {
+function geminiReviewPrompt(prompt, prevResponse, extraContext) {
   return `${GEMINI_SYS}
 
 You are improving on the following response to this prompt.
 
-PROMPT: ${prompt}
+PROMPT: ${prompt}${extraContext}
 
 CLAUDE'S RESPONSE (to improve on):
 ${prevResponse}
@@ -775,6 +976,23 @@ async function startRun() {
   clearFeed('geminiFeed');
   initAnswerPanel();
 
+  // ── Clarification step (optional) ──────────────────────────────────────────
+  let extraContext = '';
+  if (clarifyEnabled) {
+    setStatus('Generating clarifying questions…', true);
+    try {
+      const questions = await getClarifyingQuestions(prompt, claudeModel);
+      if (questions.length > 0) {
+        setStatus('Waiting for your answers…', false);
+        extraContext = await showClarifyPanel(questions);
+        if (extraContext) setStatus('Got it — starting refinement loop…', true);
+      }
+    } catch (e) {
+      // If clarification fails, just proceed without it
+      console.warn('Clarification step failed:', e);
+    }
+  }
+
   let currentAnswer = ''; // the answer being passed between models
 
   try {
@@ -790,8 +1008,8 @@ async function startRun() {
       const claudeAnswerEl = addAnswerTurn('claude', claudeTurnNum, totalTurns);
 
       const claudePrompt = i === 0
-        ? claudeFirstPrompt(prompt)
-        : claudeReviewPrompt(prompt, currentAnswer, iterNum);
+        ? claudeFirstPrompt(prompt, extraContext)
+        : claudeReviewPrompt(prompt, currentAnswer, extraContext);
 
       let claudeText = '';
       try {
@@ -816,7 +1034,7 @@ async function startRun() {
       const geminiDraftEl  = addDraftEntry('geminiFeed', `Iteration ${iterNum}`);
       const geminiAnswerEl = addAnswerTurn('gemini', geminiTurnNum, totalTurns);
 
-      const gPrompt = geminiReviewPrompt(prompt, currentAnswer, iterNum);
+      const gPrompt = geminiReviewPrompt(prompt, currentAnswer, extraContext);
 
       let geminiText = '';
       try {
