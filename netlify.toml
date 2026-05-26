@@ -1,0 +1,7 @@
+[build]
+  publish = "."
+
+[[redirects]]
+  from = "/*"
+  to   = "/debate.html"
+  status = 200
