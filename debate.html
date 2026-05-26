@@ -755,71 +755,39 @@ function scrollFeed(id) {
 }
 
 // ── Answer panel ──────────────────────────────────────────────────────────────
-function initAnswerPanel() {
+function initAnswerPanel(totalTurns) {
   turnPages = [];
-  const tabsEl  = document.getElementById('ansTabs');
-  const pagesEl = document.getElementById('ansPages');
-  tabsEl.classList.add('hidden');
-  tabsEl.innerHTML = '';
-  pagesEl.innerHTML = `
-    <div class="ans-empty">
-      <div class="ans-empty-icon">✦</div>
-      <div class="ans-empty-txt">Running first turn…</div>
+  document.getElementById('ansTabs').classList.add('hidden');
+  document.getElementById('ansPages').innerHTML = `
+    <div class="ans-empty" id="ansRunning">
+      <div class="ans-empty-icon" style="animation:throb 1.8s ease-in-out infinite;">✦</div>
+      <div class="ans-empty-txt" id="ansRunningTxt">
+        Refinement in progress — answer will appear when all ${totalTurns} turns are complete
+      </div>
     </div>`;
-  document.getElementById('ansSubLabel').textContent = 'Latest response — updates after each turn';
+  document.getElementById('ansSubLabel').textContent = 'Waiting for all turns to complete…';
 }
 
-function addAnswerTurn(model, turnNum, totalTurns) {
-  const isFirst  = turnPages.length === 0;
-  const isClaude = model === 'claude';
-  const tabsEl   = document.getElementById('ansTabs');
-  const pagesEl  = document.getElementById('ansPages');
+function showFinalAnswer(text, lastModel) {
+  const pagesEl = document.getElementById('ansPages');
+  const isClaude = lastModel === 'claude';
+  const modelColor = isClaude ? 'var(--claude-lt)' : 'var(--gemini-lt)';
+  const modelName  = isClaude ? 'Claude' : 'Gemini';
 
-  if (isFirst) {
-    pagesEl.innerHTML = '';
-    tabsEl.classList.remove('hidden');
-  }
-
-  // Deactivate all existing tabs/pages and remove latest chip
-  tabsEl.querySelectorAll('.ans-tab').forEach(t => {
-    t.classList.remove('active');
-    const chip = t.querySelector('.latest-chip');
-    if (chip) chip.remove();
-  });
-  pagesEl.querySelectorAll('.ans-page').forEach(p => p.classList.remove('active'));
-
-  // Tab
-  const tabLabel = isClaude ? `Claude` : `Gemini`;
-  const iterNum  = Math.ceil(turnNum / 2);
-  const tab = document.createElement('div');
-  tab.className = `ans-tab ${isClaude ? 'claude' : 'gemini'}-tab active`;
-  tab.innerHTML = `<span class="tab-dot"></span>${tabLabel} ${iterNum}<span class="latest-chip">latest</span>`;
-  const tabIdx = turnPages.length;
-  tab.onclick = () => showAnswerPage(tabIdx);
-  tabsEl.appendChild(tab);
-  tabsEl.scrollLeft = tabsEl.scrollWidth;
-
-  // Page
+  pagesEl.innerHTML = '';
   const page = document.createElement('div');
   page.className = 'ans-page active';
+  page.innerHTML = `<div class="final-chip" style="color:${modelColor};border-color:${modelColor}33;background:${modelColor}18;">✦ Final answer · last refined by ${modelName}</div><div id="ansText"></div>`;
   pagesEl.appendChild(page);
-
-  turnPages.push({ pageEl: page, tabEl: tab });
-  return page;
-}
-
-function showAnswerPage(idx) {
-  document.querySelectorAll('.ans-tab').forEach((t, i) => t.classList.toggle('active', i === idx));
-  document.querySelectorAll('.ans-page').forEach((p, i) => p.classList.toggle('active', i === idx));
+  document.getElementById('ansText').textContent = text;
+  document.getElementById('ansSubLabel').textContent = 'Completed — copy the answer below';
 }
 
 // ── Copy ──────────────────────────────────────────────────────────────────────
 function copyAnswer() {
-  if (!turnPages.length) return;
-  // Find the currently active page
-  const activePage = document.querySelector('.ans-page.active');
-  const text = activePage ? activePage.textContent : '';
-  navigator.clipboard.writeText(text).then(() => {
+  const textEl = document.getElementById('ansText');
+  if (!textEl) return;
+  navigator.clipboard.writeText(textEl.textContent).then(() => {
     const btn = document.getElementById('btnCopy');
     btn.textContent = '✓ Copied!';
     btn.classList.add('copied');
@@ -964,7 +932,6 @@ async function startRun() {
   const iterations  = parseInt(document.getElementById('selIter').value);
   const claudeModel = document.getElementById('selModel').value;
   const geminiModel = document.getElementById('selGeminiModel').value;
-  const totalTurns  = iterations * 2; // each iteration = 1 Claude turn + 1 Gemini turn
 
   busy = true;
   document.getElementById('btnRun').disabled = true;
@@ -974,7 +941,7 @@ async function startRun() {
 
   clearFeed('claudeFeed');
   clearFeed('geminiFeed');
-  initAnswerPanel();
+  initAnswerPanel(iterations * 2);
 
   // ── Clarification step (optional) ──────────────────────────────────────────
   let extraContext = '';
@@ -1004,8 +971,7 @@ async function startRun() {
       setStatus(`Iteration ${iterNum}/${iterations} — Claude ${i === 0 ? 'answering' : 'reviewing and improving Gemini\'s response'}…`, true);
 
       addTyping('claudeFeed');
-      const claudeDraftEl  = addDraftEntry('claudeFeed', i === 0 ? 'Initial answer' : `Iteration ${iterNum}`);
-      const claudeAnswerEl = addAnswerTurn('claude', claudeTurnNum, totalTurns);
+      const claudeDraftEl = addDraftEntry('claudeFeed', i === 0 ? 'Initial answer' : `Iteration ${iterNum}`);
 
       const claudePrompt = i === 0
         ? claudeFirstPrompt(prompt, extraContext)
@@ -1017,8 +983,7 @@ async function startRun() {
           claudeModel, CLAUDE_SYS, claudePrompt,
           text => {
             removeTyping('claudeFeed');
-            claudeDraftEl.textContent  = text;
-            claudeAnswerEl.textContent = text;
+            claudeDraftEl.textContent = text;
             scrollFeed('claudeFeed');
           }
         );
@@ -1031,8 +996,7 @@ async function startRun() {
       setStatus(`Iteration ${iterNum}/${iterations} — Gemini reviewing and improving Claude's response…`, true);
 
       addTyping('geminiFeed');
-      const geminiDraftEl  = addDraftEntry('geminiFeed', `Iteration ${iterNum}`);
-      const geminiAnswerEl = addAnswerTurn('gemini', geminiTurnNum, totalTurns);
+      const geminiDraftEl = addDraftEntry('geminiFeed', `Iteration ${iterNum}`);
 
       const gPrompt = geminiReviewPrompt(prompt, currentAnswer, extraContext);
 
@@ -1042,8 +1006,7 @@ async function startRun() {
           geminiModel, gPrompt,
           text => {
             removeTyping('geminiFeed');
-            geminiDraftEl.textContent  = text;
-            geminiAnswerEl.textContent = text;
+            geminiDraftEl.textContent = text;
             scrollFeed('geminiFeed');
           }
         );
@@ -1054,20 +1017,9 @@ async function startRun() {
       if (i < iterations - 1) await new Promise(ok => setTimeout(ok, 150));
     }
 
-    // Mark final tab
-    const lastTab = document.querySelectorAll('.ans-tab');
-    if (lastTab.length) {
-      const lt = lastTab[lastTab.length - 1];
-      const chip = lt.querySelector('.latest-chip');
-      if (chip) {
-        chip.textContent = '✦ final';
-        chip.style.background = 'rgba(245,158,11,0.25)';
-      }
-    }
-
-    document.getElementById('ansSubLabel').textContent =
-      `Final answer from ${iterations * 2} turns — click tabs to see how it evolved`;
-    setStatus(`✓ Complete — ${iterations} iterations (${iterations * 2} turns). Final answer ready.`);
+    // Gemini always has the last turn (Claude → Gemini per iteration)
+    showFinalAnswer(currentAnswer, 'gemini');
+    setStatus(`✓ Complete — ${iterations} iteration${iterations > 1 ? 's' : ''} (${iterations * 2} turns). Final answer ready.`);
 
   } catch (err) {
     removeTyping('claudeFeed');
