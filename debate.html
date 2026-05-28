@@ -110,6 +110,32 @@
       font-size: 13px; outline: none; cursor: pointer;
     }
 
+    /* ── Mode selector ───────────────────────────────────────────────────── */
+    .mode-selector {
+      display: flex;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px;
+      gap: 2px;
+    }
+    .mode-btn {
+      flex: 1; padding: 6px 10px;
+      background: transparent; border: none; border-radius: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      letter-spacing: 0.2px;
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+    .mode-btn:hover { color: var(--text); background: var(--surface2); }
+    .mode-btn.active { background: var(--surface2); color: var(--text); }
+    .mode-btn.active[data-mode="research"]  { box-shadow: inset 0 0 0 1px rgba(139,92,246,0.3); color: var(--claude-lt); }
+    .mode-btn.active[data-mode="financial"] { box-shadow: inset 0 0 0 1px rgba(245,158,11,0.3); color: var(--gold-lt); }
+    .mode-btn.active[data-mode="decision"]  { box-shadow: inset 0 0 0 1px rgba(6,182,212,0.3); color: var(--gemini-lt); }
+
     /* ── Clarification panel ─────────────────────────────────────────────── */
     .clarify-panel {
       background: var(--surface);
@@ -472,7 +498,12 @@
 
   <!-- Prompt -->
   <div class="controls">
-    <div class="ctrl-label">Your Prompt</div>
+    <div class="mode-selector" id="modeSelector">
+      <button class="mode-btn active" data-mode="research"  onclick="setMode('research')">Research / General</button>
+      <button class="mode-btn"        data-mode="financial" onclick="setMode('financial')">Financial / Investment</button>
+      <button class="mode-btn"        data-mode="decision"  onclick="setMode('decision')">Decision / Recommendation</button>
+    </div>
+    <div class="ctrl-label" style="margin-top:4px;">Your Prompt</div>
     <div class="prompt-row">
       <textarea class="prompt-input" id="prompt" rows="2"
         placeholder="Ask anything — question, task, problem. Claude answers first, Gemini reviews and improves, then they keep refining each other's response until the best answer emerges."
@@ -761,26 +792,11 @@ function initAnswerPanel(totalTurns) {
   document.getElementById('ansPages').innerHTML = `
     <div class="ans-empty" id="ansRunning">
       <div class="ans-empty-icon" style="animation:throb 1.8s ease-in-out infinite;">✦</div>
-      <div class="ans-empty-txt" id="ansRunningTxt">
-        Refinement in progress — answer will appear when all ${totalTurns} turns are complete
+      <div class="ans-empty-txt">
+        Refinement in progress — synthesis will appear after all ${totalTurns} turns complete
       </div>
     </div>`;
   document.getElementById('ansSubLabel').textContent = 'Waiting for all turns to complete…';
-}
-
-function showFinalAnswer(text, lastModel) {
-  const pagesEl = document.getElementById('ansPages');
-  const isClaude = lastModel === 'claude';
-  const modelColor = isClaude ? 'var(--claude-lt)' : 'var(--gemini-lt)';
-  const modelName  = isClaude ? 'Claude' : 'Gemini';
-
-  pagesEl.innerHTML = '';
-  const page = document.createElement('div');
-  page.className = 'ans-page active';
-  page.innerHTML = `<div class="final-chip" style="color:${modelColor};border-color:${modelColor}33;background:${modelColor}18;">✦ Final answer · last refined by ${modelName}</div><div id="ansText"></div>`;
-  pagesEl.appendChild(page);
-  document.getElementById('ansText').textContent = text;
-  document.getElementById('ansSubLabel').textContent = 'Completed — copy the answer below';
 }
 
 // ── Copy ──────────────────────────────────────────────────────────────────────
@@ -881,30 +897,71 @@ async function askGemini(geminiModel, promptText, onToken) {
   return full;
 }
 
-// ── Prompts ───────────────────────────────────────────────────────────────────
-const CLAUDE_SYS = `You are an expert AI assistant focused on producing the most accurate, clear, and comprehensive answers possible. When reviewing another model's response, identify specific gaps, errors, or areas that could be improved, then write a superior version.`;
+// ── Modes ─────────────────────────────────────────────────────────────────────
+const MODES = {
+  research: {
+    label: 'Research / General',
+    structure: `Structure your response exactly as follows:
+Position: [1-2 sentence stance]
+Key arguments: [3 bullet points max]
+Weaknesses in own argument: [1-2 points]
+Confidence: [1-10]`
+  },
+  financial: {
+    label: 'Financial / Investment',
+    structure: `Structure your response exactly as follows:
+Thesis: [1-2 sentences]
+Supporting data: [metrics, ratios, sources]
+Bear case: [what could be wrong]
+Timeframe: [short/medium/long term]
+Confidence: [1-10]`
+  },
+  decision: {
+    label: 'Decision / Recommendation',
+    structure: `Structure your response exactly as follows:
+Recommendation: [clear yes/no/conditional]
+Reasoning: [3 points max]
+Key risks: [2 points]
+Alternative to consider: [1 point]
+Confidence: [1-10]`
+  }
+};
 
-const GEMINI_SYS = `You are an expert AI assistant focused on producing the most accurate, clear, and comprehensive answers possible. When reviewing another model's response, identify specific gaps, errors, or areas that could be improved, then write a superior version.`;
+let selectedMode = 'research';
 
-function claudeFirstPrompt(prompt, extraContext) {
-  return `Please answer the following as accurately and comprehensively as possible:\n\n${prompt}${extraContext}`;
+function setMode(key) {
+  selectedMode = key;
+  document.querySelectorAll('.mode-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.mode === key)
+  );
 }
 
-function claudeReviewPrompt(prompt, prevResponse, extraContext) {
+// ── Prompts ───────────────────────────────────────────────────────────────────
+function buildSys(mode) {
+  return `You are an expert AI assistant focused on producing the most accurate, clear, and comprehensive answers possible. When reviewing another model's response, identify specific gaps, errors, or areas that could be improved, then write a superior version.\n\n${MODES[mode].structure}\n\nIMPORTANT: Every response must follow this exact structure. Do not deviate from it.`;
+}
+
+function claudeFirstPrompt(prompt, extraContext, mode) {
+  return `Please answer the following as accurately and comprehensively as possible.\n\n${MODES[mode].structure}\n\nPROMPT: ${prompt}${extraContext}`;
+}
+
+function claudeReviewPrompt(prompt, prevResponse, extraContext, mode) {
   return `You are improving on the following response to this prompt.
+
+${MODES[mode].structure}
 
 PROMPT: ${prompt}${extraContext}
 
 GEMINI'S RESPONSE (to improve on):
 ${prevResponse}
 
-Your task: Carefully review Gemini's response above. Identify any inaccuracies, gaps, unclear explanations, missing nuances, or anything that could be better. Then write an improved version that keeps what Gemini got right and fixes or expands on the rest.
+Carefully review Gemini's response. Identify inaccuracies, gaps, unclear explanations, or missing nuances. Write an improved version following the exact structure above.
 
-Output only the improved response — no preamble like "Here is my improved version".`;
+Output only the improved response — no preamble.`;
 }
 
-function geminiReviewPrompt(prompt, prevResponse, extraContext) {
-  return `${GEMINI_SYS}
+function geminiReviewPrompt(prompt, prevResponse, extraContext, mode) {
+  return `${buildSys(mode)}
 
 You are improving on the following response to this prompt.
 
@@ -913,9 +970,34 @@ PROMPT: ${prompt}${extraContext}
 CLAUDE'S RESPONSE (to improve on):
 ${prevResponse}
 
-Your task: Carefully review Claude's response above. Identify any inaccuracies, gaps, unclear explanations, missing nuances, or anything that could be better. Then write an improved version that keeps what Claude got right and fixes or expands on the rest.
+Carefully review Claude's response. Identify inaccuracies, gaps, unclear explanations, or missing nuances. Write an improved version following the exact structure above.
 
-Output only the improved response — no preamble like "Here is my improved version".`;
+Output only the improved response — no preamble.`;
+}
+
+function buildSynthPrompt(prompt, extraContext, claudeFinal, geminiFinal, mode) {
+  return `You are synthesising two AI responses that each followed a structured format.
+
+Mode: ${MODES[mode].label}
+Required structure:
+${MODES[mode].structure}
+
+PROMPT: ${prompt}${extraContext}
+
+CLAUDE'S FINAL RESPONSE:
+${claudeFinal}
+
+GEMINI'S FINAL RESPONSE:
+${geminiFinal}
+
+Your task:
+1. Produce a single best-of-both response following the exact structure above. Draw on whichever model gave the stronger answer for each field.
+2. After a line containing only "---", add a "Model Comparison" section (plain prose, no fixed structure):
+   - State each model's Confidence score
+   - Identify any fields where they materially disagreed (e.g. opposing stances, different bear cases, contradictory recommendations)
+   - Note where they converged strongly
+
+Output the structured answer first, then --- then the comparison.`;
 }
 
 // ── Main run loop ─────────────────────────────────────────────────────────────
@@ -960,55 +1042,44 @@ async function startRun() {
     }
   }
 
-  let currentAnswer = ''; // the answer being passed between models
+  let currentAnswer  = '';
+  let lastClaudeText = '';
+  const mode = selectedMode;
 
   try {
     for (let i = 0; i < iterations; i++) {
       const iterNum = i + 1;
 
       // ── Claude's turn ──────────────────────────────────────────────────
-      const claudeTurnNum = i * 2 + 1;
-      setStatus(`Iteration ${iterNum}/${iterations} — Claude ${i === 0 ? 'answering' : 'reviewing and improving Gemini\'s response'}…`, true);
-
+      setStatus(`Iteration ${iterNum}/${iterations} — Claude ${i === 0 ? 'answering' : 'reviewing Gemini\'s response'}…`, true);
       addTyping('claudeFeed');
       const claudeDraftEl = addDraftEntry('claudeFeed', i === 0 ? 'Initial answer' : `Iteration ${iterNum}`);
 
       const claudePrompt = i === 0
-        ? claudeFirstPrompt(prompt, extraContext)
-        : claudeReviewPrompt(prompt, currentAnswer, extraContext);
+        ? claudeFirstPrompt(prompt, extraContext, mode)
+        : claudeReviewPrompt(prompt, currentAnswer, extraContext, mode);
 
       let claudeText = '';
       try {
         claudeText = await askClaude(
-          claudeModel, CLAUDE_SYS, claudePrompt,
-          text => {
-            removeTyping('claudeFeed');
-            claudeDraftEl.textContent = text;
-            scrollFeed('claudeFeed');
-          }
+          claudeModel, buildSys(mode), claudePrompt,
+          text => { removeTyping('claudeFeed'); claudeDraftEl.textContent = text; scrollFeed('claudeFeed'); }
         );
       } finally { removeTyping('claudeFeed'); }
 
-      currentAnswer = claudeText;
+      lastClaudeText = claudeText;
+      currentAnswer  = claudeText;
 
       // ── Gemini's turn ──────────────────────────────────────────────────
-      const geminiTurnNum = i * 2 + 2;
-      setStatus(`Iteration ${iterNum}/${iterations} — Gemini reviewing and improving Claude's response…`, true);
-
+      setStatus(`Iteration ${iterNum}/${iterations} — Gemini reviewing Claude's response…`, true);
       addTyping('geminiFeed');
       const geminiDraftEl = addDraftEntry('geminiFeed', `Iteration ${iterNum}`);
-
-      const gPrompt = geminiReviewPrompt(prompt, currentAnswer, extraContext);
 
       let geminiText = '';
       try {
         geminiText = await askGemini(
-          geminiModel, gPrompt,
-          text => {
-            removeTyping('geminiFeed');
-            geminiDraftEl.textContent = text;
-            scrollFeed('geminiFeed');
-          }
+          geminiModel, geminiReviewPrompt(prompt, currentAnswer, extraContext, mode),
+          text => { removeTyping('geminiFeed'); geminiDraftEl.textContent = text; scrollFeed('geminiFeed'); }
         );
       } finally { removeTyping('geminiFeed'); }
 
@@ -1017,9 +1088,34 @@ async function startRun() {
       if (i < iterations - 1) await new Promise(ok => setTimeout(ok, 150));
     }
 
-    // Gemini always has the last turn (Claude → Gemini per iteration)
-    showFinalAnswer(currentAnswer, 'gemini');
-    setStatus(`✓ Complete — ${iterations} iteration${iterations > 1 ? 's' : ''} (${iterations * 2} turns). Final answer ready.`);
+    // ── Synthesis ──────────────────────────────────────────────────────
+    setStatus('Synthesising — comparing both models\' final responses…', true);
+
+    // Prepare answer panel for streaming
+    const pagesEl = document.getElementById('ansPages');
+    pagesEl.innerHTML = '';
+    document.getElementById('ansTabs').classList.add('hidden');
+    const page = document.createElement('div');
+    page.className = 'ans-page active';
+    const chip = document.createElement('div');
+    chip.className = 'final-chip';
+    chip.innerHTML = `✦ ${MODES[mode].label} · synthesised`;
+    const textEl = document.createElement('div');
+    textEl.id = 'ansText';
+    page.appendChild(chip);
+    page.appendChild(textEl);
+    pagesEl.appendChild(page);
+    document.getElementById('ansSubLabel').textContent = 'Synthesising…';
+
+    const synthSys = `You synthesise structured AI responses. Follow the required structure exactly, then add a plain-prose model comparison after a --- separator.`;
+    await askClaude(
+      'claude-sonnet-4-6', synthSys,
+      buildSynthPrompt(prompt, extraContext, lastClaudeText, currentAnswer, mode),
+      text => { textEl.textContent = text; pagesEl.scrollTop = pagesEl.scrollHeight; }
+    );
+
+    document.getElementById('ansSubLabel').textContent = 'Complete — copy the answer below';
+    setStatus(`✓ Complete — ${iterations} iteration${iterations > 1 ? 's' : ''} (${iterations * 2} turns) · ${MODES[mode].label}`);
 
   } catch (err) {
     removeTyping('claudeFeed');
